@@ -1,125 +1,129 @@
---[[
-    https://github.com/overextended/ox_lib
-
-    This file is licensed under LGPL-3.0 or higher <https://www.gnu.org/licenses/lgpl-3.0.en.html>
-
-    Copyright © 2025 Linden <https://github.com/thelindat>
-]]
-
 local contextMenus = {}
 local openContextMenu = nil
+local menuHistory = {}
 
----@class ContextMenuItem
----@field title? string
----@field menu? string
----@field icon? string | {[1]: IconProp, [2]: string};
----@field iconColor? string
----@field image? string
----@field progress? number
----@field onSelect? fun(args: any)
----@field arrow? boolean
----@field description? string
----@field metadata? string | { [string]: any } | string[]
----@field disabled? boolean
----@field readOnly? boolean
----@field event? string
----@field serverEvent? string
----@field args? any
+local function buildListMenus(rootId)
+    local menus = {}
 
----@class ContextMenuArrayItem : ContextMenuItem
----@field title string
+    local function buildMenu(id)
+        local data = contextMenus[id]
+        if not data then return end
 
----@class ContextMenuProps
----@field id string
----@field title string
----@field menu? string
----@field onExit? fun()
----@field onBack? fun()
----@field canClose? boolean
----@field options { [string]: ContextMenuItem } | ContextMenuArrayItem[]
+        local items = {}
 
-local function closeContext(_, cb, onExit)
-    if cb then cb(1) end
+        for k, opt in pairs(data.options or {}) do
+            local item = {
+                label = opt.title or ('Option %s'):format(k),
+                description = opt.description,
+                disabled = opt.disabled or opt.readOnly,
+            }
 
-    lib.resetNuiFocus()
+            if opt.menu then
+                item.submenu = opt.menu
+            elseif opt.onSelect or opt.event or opt.serverEvent then
+                item.event = '__oxlib:contextSelect'
+            end
 
-    if not openContextMenu then return end
+            item.data = {
+                menuId = id,
+                optionId = k,
+                args = opt.args,
+            }
 
-    if (cb or onExit) and contextMenus[openContextMenu].onExit then contextMenus[openContextMenu].onExit() end
+            items[#items + 1] = item
+        end
 
-    if not cb then SendNUIMessage({ action = 'hideContext' }) end
-
-    openContextMenu = nil
-end
-
----@param id string
-function lib.showContext(id)
-    if not contextMenus[id] then error('No context menu of such id found.') end
-
-    local data = contextMenus[id]
-    openContextMenu = id
-
-    lib.setNuiFocus(false)
-
-    SendNuiMessage(json.encode({
-        action = 'showContext',
-        data = {
-            title = data.title,
-            canClose = data.canClose,
-            menu = data.menu,
-            options = data.options
+        menus[id == rootId and "main" or id] = {
+            label = data.title,
+            items = items,
         }
-    }, { sort_keys = true }))
+
+        for _, opt in pairs(data.options or {}) do
+            if opt.menu and contextMenus[opt.menu] and not menus[opt.menu] then
+                buildMenu(opt.menu)
+            end
+        end
+    end
+
+    buildMenu(rootId)
+    return menus
 end
 
----@param context ContextMenuProps | ContextMenuProps[]
 function lib.registerContext(context)
-    for k, v in pairs(context) do
-        if type(k) == 'number' then
-            contextMenus[v.id] = v
-        else
+    if type(context) == 'table' then
+        if context.id then
             contextMenus[context.id] = context
-            break
+        else
+            for _, v in pairs(context) do
+                if v and v.id then
+                    contextMenus[v.id] = v
+                end
+            end
         end
     end
 end
 
----@return string?
-function lib.getOpenContextMenu() return openContextMenu end
-
----@param onExit boolean?
-function lib.hideContext(onExit) closeContext(nil, nil, onExit) end
-
-RegisterNUICallback('openContext', function(data, cb)
-    if data.back and contextMenus[openContextMenu].onBack then contextMenus[openContextMenu].onBack() end
-    cb(1)
-    lib.showContext(data.id)
-end)
-
-RegisterNUICallback('clickContext', function(id, cb)
-    cb(1)
-
-    if math.type(tonumber(id)) == 'float' then
-        id = math.tointeger(id)
-    elseif tonumber(id) then
-        id += 1
+function lib.showContext(id)
+    if not contextMenus[id] then 
+        error('No context menu with id "' .. tostring(id) .. '" found.') 
     end
 
-    local data = contextMenus[openContextMenu].options[id]
+    openContextMenu = id
+    menuHistory = { id }
 
-    if not data.event and not data.serverEvent and not data.onSelect then return end
+    local built = buildListMenus(id)
+    exports['pulsar-hud']:ListMenuShow(built)
+end
 
+function lib.hideContext()
     openContextMenu = nil
+    menuHistory = {}
+    exports['pulsar-hud']:ListMenuClose()
+end
 
-    SendNUIMessage({ action = 'hideContext' })
-    lib.resetNuiFocus()
+function lib.getOpenContextMenu()
+    return openContextMenu
+end
 
-    if data.onSelect then data.onSelect(data.args) end
-    if data.event then TriggerEvent(data.event, data.args) end
-    if data.serverEvent then TriggerServerEvent(data.serverEvent, data.args) end
+AddEventHandler('__oxlib:contextSelect', function(data)
+    local menu = contextMenus[data.menuId]
+    if not menu then return end
+
+    local opt = menu.options[data.optionId]
+    if not opt then return end
+
+    exports['pulsar-hud']:ListMenuClose()
+    openContextMenu = nil
+    menuHistory = {}
+
+    if opt.onSelect then opt.onSelect(data.args) end
+    if opt.event then TriggerEvent(opt.event, data.args) end
+    if opt.serverEvent then TriggerServerEvent(opt.serverEvent, data.args) end
 end)
 
-RegisterNUICallback('closeContext', closeContext)
+AddEventHandler('ListMenu:EnterSubMenu', function(submenuId)
+    if not contextMenus[submenuId] then return end
 
+    table.insert(menuHistory, submenuId)
+    openContextMenu = submenuId
 
+    local built = buildListMenus(submenuId)
+    exports['pulsar-hud']:ListMenuShow(built)
+end)
 
+AddEventHandler('ListMenu:GoBack', function()
+    if #menuHistory > 1 then
+        table.remove(menuHistory)
+        local previous = menuHistory[#menuHistory]
+
+        openContextMenu = previous
+        local built = buildListMenus(previous)
+        exports['pulsar-hud']:ListMenuShow(built)
+    else
+        lib.hideContext()
+    end
+end)
+
+AddEventHandler('ListMenu:Close', function()
+    lib.hideContext()
+end)

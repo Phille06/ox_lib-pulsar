@@ -31,24 +31,10 @@ local settings = require 'resource.settings'
 ---@param data NotifyProps
 ---@diagnostic disable-next-line: duplicate-set-field
 function lib.notify(data)
-    local sound = settings.notification_audio and data.sound
-    data.sound = nil
-    data.position = data.position or settings.notification_position
-
-    SendNUIMessage({
-        action = 'notify',
-        data = data
-    })
-
-    if not sound then return end
-
-    if sound.bank then lib.requestAudioBank(sound.bank) end
-
-    local soundId = GetSoundId()
-    PlaySoundFrontend(soundId, sound.name, sound.set, true)
-    ReleaseSoundId(soundId)
-
-    if sound.bank then ReleaseNamedScriptAudioBank(sound.bank) end
+    local msg = data.description or data.title or 'Notification'
+    local type = data.type or 'info'
+    
+    exports['pulsar-hud']:Notification(type or "info", msg, duration or 5000)
 end
 
 ---@class DefaultNotifyProps

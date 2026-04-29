@@ -6,83 +6,120 @@
     Copyright © 2025 Linden <https://github.com/thelindat>
 ]]
 
-local input
+local inputPromise
 
 ---@class InputDialogRowProps
 ---@field type 'input' | 'number' | 'checkbox' | 'select' | 'slider' | 'multi-select' | 'date' | 'date-range' | 'time' | 'textarea' | 'color'
 ---@field label string
----@field options? { value: string, label: string, default?: string }[]
+---@field options? table
 ---@field password? boolean
----@field icon? string | {[1]: IconProp, [2]: string};
----@field iconColor? string
+---@field icon? string
 ---@field placeholder? string
----@field default? string | number
+---@field default? any
 ---@field disabled? boolean
 ---@field checked? boolean
 ---@field min? number
 ---@field max? number
 ---@field step? number
----@field autosize? boolean
 ---@field required? boolean
----@field format? string
----@field returnString? boolean
----@field clearable? boolean
----@field searchable? boolean
----@field description? string
----@field maxSelectedValues? number
 ---@field minLength? number
 ---@field maxLength? number
+---@field description? string
 
 ---@class InputDialogOptionsProps
 ---@field allowCancel? boolean
 ---@field size? 'xs' | 'sm' | 'md' | 'lg' | 'xl'
 
----@param heading string
----@param rows string[] | InputDialogRowProps[]
----@param options InputDialogOptionsProps[]?
----@return string[] | number[] | boolean[] | nil
-function lib.inputDialog(heading, rows, options)
-    if input then return end
-    input = promise.new()
+local function normalizeRows(rows)
+    local normalized = {}
 
-    -- Backwards compat with string tables
-    for i = 1, #rows do
-        if type(rows[i]) == 'string' then
-            rows[i] = { type = 'input', label = rows[i] --[[@as string]] }
+    for i, row in ipairs(rows or {}) do
+        if type(row) == 'string' then
+            row = { type = 'input', label = row }
         end
+
+        local inputType = row.type or 'text'
+        if inputType == 'input' then
+            inputType = 'text'
+        end
+
+        local options = row.options or {}
+        local inputProps = options.inputProps or {}
+
+        if row.min ~= nil then inputProps.min = row.min end
+        if row.max ~= nil then inputProps.max = row.max end
+        if row.minLength ~= nil then inputProps.minLength = row.minLength end
+        if row.maxLength ~= nil then inputProps.maxLength = row.maxLength end
+        if row.required ~= nil then inputProps.required = row.required end
+        if row.placeholder then inputProps.placeholder = row.placeholder end
+
+        if next(inputProps) then
+            options.inputProps = inputProps
+        end
+
+        if row.default ~= nil and options.value == nil then
+            options.value = row.default
+        end
+
+        normalized[i] = {
+            id = row.id or ('field_' .. i),
+            label = row.label,
+            type = inputType,
+            options = options,
+        }
     end
 
-    lib.setNuiFocus(false)
-    SendNUIMessage({
-        action = 'openDialog',
-        data = {
-            heading = heading,
-            rows = rows,
-            options = options
-        }
-    })
+    return normalized
+end
 
-    return Citizen.Await(input)
+function lib.inputDialog(heading, rows, options)
+    if inputPromise then return end
+
+    inputPromise = promise.new()
+
+    local inputs = normalizeRows(rows)
+
+    local callbackEvent = ('input:result:%s:%d'):format(GetCurrentResourceName(), GetGameTimer())
+
+    local resultHandler = AddEventHandler(callbackEvent, function(values)
+        if inputPromise then
+            local p = inputPromise
+            inputPromise = nil
+
+            local result = {}
+            for i = 1, #inputs do
+                local id = inputs[i].id
+                result[i] = values and values[id] or nil
+            end
+
+            p:resolve(result)
+        end
+    end)
+
+    local closedHandler = AddEventHandler('Input:Closed', function(closedEvent)
+        if closedEvent == callbackEvent and inputPromise then
+            local p = inputPromise
+            inputPromise = nil
+            p:resolve(nil)
+        end
+    end)
+
+    exports['pulsar-hud']:InputShow(heading, heading, inputs, callbackEvent, options or {})
+
+    local result = Citizen.Await(inputPromise)
+
+    RemoveEventHandler(resultHandler)
+    RemoveEventHandler(closedHandler)
+
+    return result
 end
 
 function lib.closeInputDialog()
-    if not input then return end
+    if not inputPromise then return end
 
-    lib.resetNuiFocus()
-    SendNUIMessage({
-        action = 'closeInputDialog'
-    })
+    exports['pulsar-hud']:InputClose()
 
-    input:resolve(nil)
-    input = nil
+    local p = inputPromise
+    inputPromise = nil
+    p:resolve(nil)
 end
-
-RegisterNUICallback('inputData', function(data, cb)
-    cb(1)
-    lib.resetNuiFocus()
-
-    local promise = input
-    input = nil
-
-    promise:resolve(data)
-end)

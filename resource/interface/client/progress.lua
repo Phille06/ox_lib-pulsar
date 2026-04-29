@@ -75,6 +75,87 @@ local controls = {
     INPUT_VEH_MOUSE_CONTROL_OVERRIDE = isFivem and 106 or 0x39CCABD5
 }
 
+local function convertTonorr(data)
+    local disables = {
+        disableMovement    = data.disable and (data.disable.move or data.disable.movement) or false,
+        disableCarMovement = data.disable and (data.disable.car or data.disable.vehicle) or false,
+        disableMouse       = data.disable and (data.disable.mouse) or false,
+        disableCombat      = data.disable and (data.disable.combat ~= false) or true,
+    }
+
+    local action = {
+        name = data.label or "progress",
+        duration = data.duration or 0,
+        label = data.label or "",
+        useWhileDead = data.useWhileDead,
+        canCancel = data.canCancel ~= false,
+        controlDisables = disables,
+
+        ignoreModifier = true,
+        disarm = true,
+    }
+
+    if data.anim then
+        if type(data.anim) == 'table' then
+            local dict  = data.anim.dict or data.anim.animDict
+            local clip  = data.anim.clip or data.anim.anim
+            local flags = data.anim.flag or data.anim.flags
+
+            if dict and clip then
+                local defaultFlags = 49
+                action.animation = {
+                    animDict = dict,
+                    anim = clip,
+                    flags = flags or defaultFlags,
+                }
+
+            elseif data.anim.scenario then
+                action.animation = { task = data.anim.scenario }
+
+            elseif type(data.anim[1]) == 'string' and type(data.anim[2]) == 'string' then
+                local defaultFlags = 49
+                action.animation = {
+                    animDict = data.anim[1],
+                    anim = data.anim[2],
+                    flags = data.anim[3] or defaultFlags,
+                }
+            end
+        elseif type(data.anim) == 'string' then
+            action.animation = { task = data.anim }
+        end
+    end
+
+    local function convertProp(prop)
+        if not prop then return nil end
+
+        return {
+            model = prop.model,
+            bone = prop.bone,
+            coords = prop.pos and {
+                x = prop.pos.x,
+                y = prop.pos.y,
+                z = prop.pos.z,
+            } or prop.coords,
+            rotation = prop.rot and {
+                x = prop.rot.x,
+                y = prop.rot.y,
+                z = prop.rot.z,
+            } or prop.rotation,
+        }
+    end
+
+    if data.prop then
+        if data.prop[1] then
+            action.prop = convertProp(data.prop[1])
+            action.propTwo = convertProp(data.prop[2])
+        else
+            action.prop = convertProp(data.prop)
+        end
+    end
+
+    return action
+end
+
 ---@param data ProgressProps
 local function startProgress(data)
     playerState.invBusy = true
@@ -167,51 +248,30 @@ end
 ---@param data ProgressProps
 ---@return boolean?
 function lib.progressBar(data)
-    while progress ~= nil do Wait(0) end
+    local action = convertTonorr(data)
 
-    if not interruptProgress(data) then
-        SendNUIMessage({
-            action = 'progress',
-            data = {
-                label = data.label,
-                duration = data.duration
-            }
-        })
+    local p = promise.new()
 
-        return startProgress(data)
-    end
+    exports['pulsar-hud']:Progress(action, function(cancelled)
+        p:resolve(not cancelled)
+    end)
+
+    return Citizen.Await(p)
 end
 
 ---@param data ProgressProps
 ---@return boolean?
-function lib.progressCircle(data)
-    while progress ~= nil do Wait(0) end
-
-    if not interruptProgress(data) then
-        SendNUIMessage({
-            action = 'circleProgress',
-            data = {
-                duration = data.duration,
-                position = data.position,
-                label = data.label
-            }
-        })
-
-        return startProgress(data)
-    end
+function lib.progressCircle(data) -- pulsar does not have this we use normal progress bar for it
+    return lib.progressBar(data)
 end
 
 function lib.cancelProgress()
-    if not progress then
-        error('No progress bar is active')
-    end
-
-    progress = false
+    exports['pulsar-hud']:ProgressCancel()
 end
 
 ---@return boolean
 function lib.progressActive()
-    return progress and true
+    return LocalPlayer.state.doingAction or false
 end
 
 RegisterNUICallback('progressComplete', function(data, cb)
@@ -220,7 +280,8 @@ RegisterNUICallback('progressComplete', function(data, cb)
 end)
 
 RegisterCommand('cancelprogress', function()
-    if progress?.canCancel then progress = false end
+    progress = false
+    exports['pulsar-hud']:ProgressCancel()
 end)
 
 if isFivem then

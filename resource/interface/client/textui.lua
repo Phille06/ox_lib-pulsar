@@ -7,6 +7,7 @@
 ]]
 
 ---@class TextUIOptions
+---@field action? string           -- Action identifier, dynamically sourced from ox_lib or provided by the user.
 ---@field position? 'right-center' | 'left-center' | 'top-center' | 'bottom-center';
 ---@field icon? string | {[1]: IconProp, [2]: string};
 ---@field iconColor? string;
@@ -19,26 +20,17 @@ local currentText
 ---@param text string
 ---@param options? TextUIOptions
 function lib.showTextUI(text, options)
-    if currentText == text then return end
-
-    if not options then options = {} end
-
-    options.text = text
+    if currentText == text then 
+        return 
+    end
     currentText = text
-
-    SendNUIMessage({
-        action = 'textUi',
-        data = options
-    })
-
+    exports['pulsar-hud']:ActionShow("ox_lib", text)
     isOpen = true
 end
 
 function lib.hideTextUI()
-    SendNUIMessage({
-        action = 'textUiHide'
-    })
-
+    if not isOpen then return end
+    exports['pulsar-hud']:ActionHide("ox_lib")
     isOpen = false
     currentText = nil
 end

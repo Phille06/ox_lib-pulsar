@@ -4,6 +4,8 @@
 # OX_LIB
 **Shared utility library for Pulsar Framework resources**
 
+## This Converts Alot of ox_libs calls to Pulsar Framework calls instead. There are some limitations, some things could be done better. There might be edge cases where it does not work correctly, if thats the case just let me know.
+
 [![Lua](https://img.shields.io/badge/Lua-2C2D72?style=flat-square&logo=lua&logoColor=white)]()
 [![FiveM](https://img.shields.io/badge/FiveM-F40552?style=flat-square)]()
 
@@ -24,6 +26,7 @@ Core utility library providing shared modules for caching, callbacks, interfaces
 |---|---|
 | **Original project** | [overextended/ox_lib](https://github.com/overextended/ox_lib) |
 | **Original authors** | [Overextended](https://github.com/overextended) |
+| **Forked off Pulsar Framework** | [Overextended](https://github.com/PulsarFW/ox_lib) |
 
 ## License
 

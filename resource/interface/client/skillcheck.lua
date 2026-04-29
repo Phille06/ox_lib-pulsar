@@ -11,45 +11,74 @@ local skillcheck
 
 ---@alias SkillCheckDifficulity 'easy' | 'medium' | 'hard' | { areaSize: number, speedMultiplier: number }
 
+local difficultyMap = {
+    easy   = { rate = 1.5, size = 12 },
+    medium = { rate = 2.5, size = 8 },
+    hard   = { rate = 4.0, size = 6 },
+}
+
+local isActive = false
+
 ---@param difficulty SkillCheckDifficulity | SkillCheckDifficulity[]
 ---@param inputs string[]?
 ---@return boolean?
 function lib.skillCheck(difficulty, inputs)
-    if skillcheck then return end
-    skillcheck = promise:new()
+    if isActive then return end
 
-    lib.setNuiFocus(false, true)
-    SendNUIMessage({
-        action = 'startSkillCheck',
-        data = {
-            difficulty = difficulty,
-            inputs = inputs
+    if type(difficulty) == "table" and difficulty[1] then
+        for i = 1, #difficulty do
+            local result = lib.skillCheck(difficulty[i], inputs)
+            if not result then return false end
+        end
+        return true
+    end
+
+    local rate, size
+
+    if type(difficulty) == "string" then
+        local preset = difficultyMap[difficulty] or difficultyMap.medium
+        rate = preset.rate
+        size = preset.size
+    elseif type(difficulty) == "table" then
+        size = difficulty.areaSize or 25
+        rate = difficulty.speedMultiplier or 2.5
+    else
+        rate = 2.5
+        size = 25
+    end
+
+    local p = promise:new()
+    isActive = true
+
+    exports['pulsar-games']:MinigamePlayRoundSkillbar(
+        rate,
+        size,
+        {
+            onSuccess = function()
+                isActive = false
+                p:resolve(true)
+            end,
+            onFail = function()
+                isActive = false
+                p:resolve(false)
+            end,
+        },
+        {
+            animation = false,
         }
-    })
+    )
 
-    return Citizen.Await(skillcheck)
+    return Citizen.Await(p)
 end
 
 function lib.cancelSkillCheck()
-    if not skillcheck then
+    if not isActive then
         error('No skillCheck is active')
     end
-
-    SendNUIMessage({action = 'skillCheckCancel'})
+    exports["norr-base"]:FetchComponent("Minigame"):Cancel()
+    isActive = false
 end
 
----@return boolean
 function lib.skillCheckActive()
-    return skillcheck ~= nil
+    return isActive
 end
-
-RegisterNUICallback('skillCheckOver', function(success, cb)
-    cb(1)
-
-    if skillcheck then
-        lib.resetNuiFocus()
-
-        skillcheck:resolve(success)
-        skillcheck = nil
-    end
-end)

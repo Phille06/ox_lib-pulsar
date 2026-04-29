@@ -329,4 +329,27 @@ if service == 'loki' then
 	end
 end
 
+if service == 'pulsar' then
+    local levelMap = {
+        trace    = 'Trace',
+        info     = 'Info',
+        warn     = 'Warn',
+        warning  = 'Warn',
+        error    = 'Error',
+        critical = 'Critical',
+    }
+
+    function lib.logger(source, event, message, ...)
+        local tags = formatTags(source, ... and string.strjoin(',', string.tostringall(...)) or nil)
+        local method = levelMap[event:lower()] or 'Info'
+
+        exports["pulsar-core"]["Logger" .. method](
+            cache.resource,
+            message,
+            { console = true },
+            tags
+        )
+    end
+end
+
 return lib.logger
